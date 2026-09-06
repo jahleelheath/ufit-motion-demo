@@ -95,47 +95,36 @@
       });
     }
 
+    // Wait for the login form to mount, then sign in. The SPA renders it
+    // asynchronously after a logout, so polling beats a fixed timeout.
+    function whenLoginReady(cb, tries) {
+      tries = tries || 0;
+      if (document.querySelector('#login-form')) return cb();
+      if (tries > 40) return;               // ~6s, then stop rather than spin
+      setTimeout(function () { whenLoginReady(cb, tries + 1); }, 150);
+    }
+
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest('[data-demo-email]');
       if (!btn) return;
       var email = btn.getAttribute('data-demo-email');
       var portal = btn.getAttribute('data-demo-portal');
 
-      // Switching roles from inside the app is the common case: a founder clicks
-      // through all four. The session survives a route change, so the SPA just
-      // re-renders the dashboard and the click looks like it did nothing. Drop the
-      // session first, then land on a real login form.
-      if (!document.querySelector('#login-form')) {
-        fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin'
-        }).catch(function () {}).then(function () {
-          try {
-            sessionStorage.setItem('demoAutoLogin', JSON.stringify({ email: email, portal: portal }));
-          } catch (_) {}
-          location.href = '/login';
-        });
-        return;
-      }
-      signIn(email, portal);
-    });
+      if (document.querySelector('#login-form')) { signIn(email, portal); return; }
 
-    // Resume the sign-in the logout above interrupted.
-    (function resumeAfterLogout() {
-      var raw;
-      try { raw = sessionStorage.getItem('demoAutoLogin'); } catch (_) { return; }
-      if (!raw) return;
-      try { sessionStorage.removeItem('demoAutoLogin'); } catch (_) {}
-      var want;
-      try { want = JSON.parse(raw); } catch (_) { return; }
-      var tries = 0;
-      (function attempt() {
-        if (document.querySelector('#login-form')) { signIn(want.email, want.portal); return; }
-        if (++tries > 40) return;   // ~6s, then give up rather than spin
-        setTimeout(attempt, 150);
-      })();
-    })();
+      // Already signed in, which is the normal case once a founder starts
+      // clicking through roles. Use the app's own logout rather than posting to
+      // the endpoint directly: it clears the in-memory user, resets the portal
+      // and re-renders the login form. Posting to /api/auth/logout by hand left
+      // the SPA holding a stale session and the click silently did nothing.
+      if (typeof window._doLogout === 'function') {
+        Promise.resolve(window._doLogout()).catch(function () {}).then(function () {
+          whenLoginReady(function () { signIn(email, portal); });
+        });
+      } else {
+        location.href = '/login';
+      }
+    });
 
   })();
   </script>

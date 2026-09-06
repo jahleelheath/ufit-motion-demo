@@ -98,6 +98,8 @@ def test_role_switch_clears_the_session_first(monkeypatch, tmp_path):
     """
     c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw-for-test")
     html = c.get("/login").get_data(as_text=True)
-    assert "/api/auth/logout" in html
-    # The intended sign-in has to survive the reload that logout triggers.
-    assert "demoAutoLogin" in html
+    # Use the SPA's own logout, which clears in-memory state and re-renders the
+    # login form. Posting to /api/auth/logout directly left the SPA holding a
+    # stale session and the click silently did nothing.
+    assert "_doLogout" in html
+    assert "whenLoginReady" in html
