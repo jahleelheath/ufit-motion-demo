@@ -59,3 +59,12 @@ Password is set via `UFIT_SEED_PASSWORD`.
       gunicorn wsgi:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:8000
 
 Leave `DATABASE_URL` unset and it runs on SQLite and seeds itself.
+
+
+## One click deploy
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/jahleelheath/ufit-motion-demo)
+
+The root `render.yaml` is the demo blueprint and never sets `DATABASE_URL`.
+The production blueprint is kept as `render-production.yaml`.
+Set `UFIT_SEED_PASSWORD` in the Render dashboard after the first deploy.
