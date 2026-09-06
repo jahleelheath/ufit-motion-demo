@@ -67,3 +67,23 @@ def test_roles_are_listed_most_capable_first(monkeypatch, tmp_path):
     order = ["admin@ufit.com", "coach@demo.com", "principal@demo.com", "parent@demo.com"]
     positions = [html.index(e) for e in order]
     assert positions == sorted(positions)
+
+
+def test_each_role_button_carries_the_portal_the_api_expects(monkeypatch, tmp_path):
+    """The login API takes {email, password, portal} and 400s on a mismatch.
+
+    Filling only the credentials sends whichever portal happened to be selected,
+    which failed silently for every role on the first deployed build. Each button
+    must carry the portal key that matches its account.
+    """
+    c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw-for-test")
+    html = c.get("/login").get_data(as_text=True)
+    expected = {
+        "admin@ufit.com": "admin",
+        "coach@demo.com": "coach",
+        "principal@demo.com": "org",   # principals sign in through the Organization portal
+        "parent@demo.com": "parent",
+    }
+    for email, portal in expected.items():
+        needle = f'data-demo-email="{email}" data-demo-portal="{portal}"'
+        assert needle in html, f"{email} must post portal={portal}"

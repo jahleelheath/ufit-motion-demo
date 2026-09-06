@@ -35,13 +35,13 @@
     <div class="demo-bar__inner">
       <span class="demo-bar__tag">DEMO</span>
       <span class="demo-bar__text">Sign in as</span>
-      <button type="button" class="demo-bar__btn" data-demo-email="admin@ufit.com">
+      <button type="button" class="demo-bar__btn" data-demo-email="admin@ufit.com" data-demo-portal="admin">
         <b>1. Admin</b><i>every school, analytics, audit log</i></button>
-      <button type="button" class="demo-bar__btn" data-demo-email="coach@demo.com">
+      <button type="button" class="demo-bar__btn" data-demo-email="coach@demo.com" data-demo-portal="coach">
         <b>2. Head Coach</b><i>log sessions, assessments, incidents</i></button>
-      <button type="button" class="demo-bar__btn" data-demo-email="principal@demo.com">
+      <button type="button" class="demo-bar__btn" data-demo-email="principal@demo.com" data-demo-portal="org">
         <b>3. Principal</b><i>one school, compliance and growth</i></button>
-      <button type="button" class="demo-bar__btn" data-demo-email="parent@demo.com">
+      <button type="button" class="demo-bar__btn" data-demo-email="parent@demo.com" data-demo-portal="parent">
         <b>4. Parent</b><i>one child, read only</i></button>
       <span class="demo-bar__note">Ordered by how much of the app each role opens. Seeded data only, no real student records.</span>
     </div>
@@ -67,25 +67,48 @@
   <script>
   (function () {
     var PW = {{ demo_password | tojson }};
+
     function setNative(el, v) {
       var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
-      var setter = Object.getOwnPropertyDescriptor(proto.prototype, 'value').set;
-      setter.call(el, v);
+      Object.getOwnPropertyDescriptor(proto.prototype, 'value').set.call(el, v);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
+
+    // The SPA posts { email, password, portal }. Filling only the credentials
+    // sends whatever portal happens to be selected, and the API rejects the
+    // mismatch with a 400. So the portal card is clicked first, and because the
+    // SPA re-renders the form on that click, the fill is deferred a frame.
+    function signIn(email, portal) {
+      var card = document.querySelector('.portal-card[data-portal="' + portal + '"]');
+      if (card && !card.classList.contains('active')) card.click();
+      requestAnimationFrame(function () {
+        setTimeout(function () {
+          var form = document.querySelector('#login-form');
+          if (!form) return;
+          var e = form.querySelector('#email'), p = form.querySelector('#password');
+          if (!e || !p) return;
+          setNative(e, email);
+          setNative(p, PW);
+          form.requestSubmit ? form.requestSubmit() : form.submit();
+        }, 60);
+      });
+    }
+
     document.addEventListener('click', function (ev) {
       var btn = ev.target.closest('[data-demo-email]');
       if (!btn) return;
-      var form = document.querySelector('#login-form');
-      // The SPA renders the login form lazily, so route there first and retry.
-      if (!form) { location.hash = ''; location.pathname = '/login'; return; }
-      var email = form.querySelector('#email');
-      var pw = form.querySelector('#password');
-      if (!email || !pw) return;
-      setNative(email, btn.getAttribute('data-demo-email'));
-      setNative(pw, PW);
-      form.requestSubmit ? form.requestSubmit() : form.submit();
+      var email = btn.getAttribute('data-demo-email');
+      var portal = btn.getAttribute('data-demo-portal');
+      // Deep link straight into the app: if the login form is not mounted yet,
+      // route to /login and retry once it is.
+      if (!document.querySelector('#login-form')) {
+        history.pushState({}, '', '/login');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        setTimeout(function () { signIn(email, portal); }, 400);
+        return;
+      }
+      signIn(email, portal);
     });
   })();
   </script>
