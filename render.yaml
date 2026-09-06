@@ -25,8 +25,11 @@ services:
         value: /tmp/ufit-demo.db
       - key: UFIT_SECRET_KEY
         generateValue: true
+      # Let Render mint this. Nobody needs to know it or type it anywhere: the app
+      # reads it from the environment and the demo bar renders it into the login page,
+      # so the one-click buttons work without a human ever handling the value.
       - key: UFIT_SEED_PASSWORD
-        sync: false          # set this in the Render dashboard, never in this file
+        generateValue: true
       - key: UFIT_APP_ROOT
         value: /opt/render/project/src
       # Renders the demo credential bar on the login page. app/__init__.py refuses to
