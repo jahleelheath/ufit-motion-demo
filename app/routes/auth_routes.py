@@ -1,0 +1,944 @@
+"""
+auth_routes.py — Authentication blueprint for Ufit Motion.
+
+Portals map to role groups:
+  admin  → ceo, admin
+  coach  → head_coach, assistant_coach, site_coordinator, coach_overseer
+  staff  → principal, school_staff, parent
+
+All passwords are hashed with werkzeug.security (PBKDF2-SHA256).
+Password reset tokens are stored in the users table and expire after 1 hour.
+"""
+
+import hashlib
+import random
+import secrets
+import time
+from datetime import datetime, timezone, timedelta
+
+from flask import Blueprint, jsonify, request, session
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.auth import current_user, ADMIN_ROLES, COACH_ROLES, SCHOOL_ROLES
+from app.database import get_db
+from app.extensions import limiter
+from app.routes._helpers import audit, now_utc, parse_json, serialize_user
+
+auth_bp = Blueprint("auth", __name__)
+
+# Pre-computed hash for constant-time "user not found" path — prevents timing attacks.
+_TIMING_HASH = generate_password_hash("constant_timing_dummy_ufit", method="pbkdf2:sha256")
+
+# ---------------------------------------------------------------------------
+# Portal → allowed roles mapping
+# ---------------------------------------------------------------------------
+PORTAL_ROLES: dict[str, tuple[str, ...]] = {
+    "admin": ADMIN_ROLES,
+    "coach": COACH_ROLES,
+    "org": SCHOOL_ROLES,
+    "parent": ("parent",),
+    # Backward-compatible alias used by older clients.
+    "staff": SCHOOL_ROLES + ("parent",),
+}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/login
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/login", methods=["POST"])
+@limiter.limit("10 per minute")
+def login():
+    """
+    Authenticate a user.
+
+    Body: { email, password, portal }
+    Portal must be 'admin', 'coach', or 'staff'.
+    The user's role must be in the portal's allowed-roles list.
+
+    Returns: { ok, user } on success or { error } on failure.
+    """
+    data = parse_json()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    portal = (data.get("portal") or "").strip().lower()
+
+    if not email or not password:
+        return jsonify({"error": "Email and password are required."}), 400
+
+    allowed_roles = PORTAL_ROLES.get(portal)
+    if allowed_roles is None:
+        return jsonify({"error": "Invalid portal. Must be admin, coach, org, or parent."}), 400
+
+    db = get_db()
+    try:
+        try:
+            row = db.execute(
+                """SELECT u.user_id, u.role, u.first_name, u.last_name, u.email,
+                          u.password_hash, u.active_status, u.auth_uid,
+                          sp.staff_id, sp.position_title,
+                          s.school_id, s.school_name,
+                          sa.program_id
+                   FROM users u
+                   LEFT JOIN staff_profiles sp ON sp.user_id = u.user_id
+                   LEFT JOIN staff_assignments sa
+                          ON sa.staff_id = sp.staff_id AND sa.active_status = TRUE
+                   LEFT JOIN schools s ON s.school_id = sa.school_id
+                   WHERE u.email = ? AND u.deleted_at IS NULL""",
+                (email,),
+            ).fetchone()
+        except Exception:
+            return jsonify({"error": "Login unavailable. Please try again."}), 500
+
+        # Constant-time "no such user" path — still run check_password_hash to
+        # prevent timing attacks.
+        if row is None:
+            check_password_hash(_TIMING_HASH, password)
+            audit(db, None, "LOGIN_FAILED", "users", None,
+                  new_values={"email": email, "reason": "user_not_found", "ip": request.remote_addr})
+            db.commit()
+            return jsonify({"error": "Invalid email or password."}), 401
+
+        # Pending invite users have no password_hash yet — block before bcrypt to avoid TypeError.
+        # Use generic "invalid email or password" to avoid enumerating which emails
+        # have pending invites pending (SEC-010).
+        if not row["password_hash"]:
+            check_password_hash(_TIMING_HASH, password)  # constant-time hash check
+            audit(db, row["user_id"], "LOGIN_FAILED", "users", row["user_id"],
+                  new_values={"reason": "pending_invite", "ip": request.remote_addr})
+            db.commit()
+            return jsonify({"error": "Invalid email or password."}), 401
+
+        if not check_password_hash(row["password_hash"], password):
+            audit(db, row["user_id"], "LOGIN_FAILED", "users", row["user_id"],
+                  new_values={"reason": "invalid_password", "ip": request.remote_addr})
+            db.commit()
+            return jsonify({"error": "Invalid email or password."}), 401
+
+        if not row["active_status"]:
+            audit(db, row["user_id"], "LOGIN_FAILED", "users", row["user_id"],
+                  new_values={"reason": "account_deactivated", "ip": request.remote_addr})
+            db.commit()
+            return jsonify({"error": "This account has been deactivated. Contact your administrator."}), 403
+
+        if row["role"] not in allowed_roles:
+            audit(db, row["user_id"], "LOGIN_FAILED", "users", row["user_id"],
+                  new_values={"reason": "wrong_portal", "portal": portal, "ip": request.remote_addr})
+            db.commit()
+            return jsonify({"error": "You do not have access to this portal."}), 403
+
+        session.clear()
+        session["user_id"] = row["user_id"]
+        session.permanent = True
+
+        # Multi-school: pull every active assignment for this user. If exactly
+        # one, auto-select it into the session. If more than one, the SPA shows
+        # a "Where are you working today?" picker before the dashboard renders.
+        assignments = []
+        if row["staff_id"]:
+            assignment_rows = db.execute(
+                """SELECT s.school_id, s.school_name, sa.assignment_role
+                   FROM staff_assignments sa
+                   JOIN schools s ON s.school_id = sa.school_id AND s.deleted_at IS NULL
+                   WHERE sa.staff_id = ? AND sa.active_status = TRUE
+                         AND (sa.deleted_at IS NULL)
+                   ORDER BY s.school_name""",
+                (row["staff_id"],),
+            ).fetchall()
+            assignments = [
+                {"school_id": r["school_id"],
+                 "school_name": r["school_name"],
+                 "role": r["assignment_role"]}
+                for r in assignment_rows
+            ]
+
+        needs_school_selection = len(assignments) > 1
+        if len(assignments) == 1:
+            session["current_school_id"] = assignments[0]["school_id"]
+
+        audit(db, row["user_id"], "LOGIN", "users", row["user_id"],
+              new_values={"portal": portal, "ip": request.remote_addr,
+                          "assignment_count": len(assignments)})
+        db.commit()
+
+        user_dict = serialize_user(dict(row))
+        user_dict["assignments"] = assignments
+        return jsonify({
+            "ok": True,
+            "user": user_dict,
+            "needs_school_selection": needs_school_selection,
+        })
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/select-school
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/select-school", methods=["POST"])
+def select_school():
+    """
+    Set the active school for a multi-school coach.
+
+    Validates the user has an active staff_assignment to the requested school,
+    then writes the school_id to session.current_school_id. Subsequent
+    school-scoped queries should prefer session.current_school_id over the
+    user's default first-assignment.
+    """
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    data = parse_json()
+    school_id = data.get("school_id")
+    if not isinstance(school_id, int):
+        return jsonify({"error": "school_id (integer) is required."}), 400
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT s.school_id, s.school_name
+               FROM schools s
+               JOIN staff_assignments sa
+                    ON sa.school_id = s.school_id
+                    AND sa.active_status = TRUE
+                    AND (sa.deleted_at IS NULL)
+               JOIN staff_profiles sp
+                    ON sp.staff_id = sa.staff_id
+                    AND (sp.deleted_at IS NULL)
+               WHERE sp.user_id = ? AND s.school_id = ? AND s.deleted_at IS NULL""",
+            (user["user_id"], school_id),
+        ).fetchone()
+        if row is None:
+            return jsonify({"error": "You don't have an active assignment to that school."}), 403
+
+        session["current_school_id"] = row["school_id"]
+        audit(db, user["user_id"], "school_selected", "users", user["user_id"],
+              new_values={"school_id": row["school_id"]})
+        db.commit()
+        return jsonify({"ok": True, "school": dict(row)})
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/coach-register  (B8 — school invite code self-registration)
+# ---------------------------------------------------------------------------
+_COACH_REGISTER_VALID_ROLES = ("head_coach", "assistant_coach")
+
+
+@auth_bp.route("/api/auth/coach-register", methods=["POST"])
+@limiter.limit("5 per hour")
+def coach_register():
+    """
+    Public endpoint — any visitor with a valid school invite code can
+    self-register as a pending coach. Server creates the user with
+    active_status=FALSE and a 24h invite token; the user activates by
+    setting their password via the emailed link.
+
+    Body: { code, first_name, last_name, email, role }
+    role must be 'head_coach' or 'assistant_coach' — no admin escalation
+    via this endpoint.
+    """
+    data = parse_json()
+    code = (data.get("code") or "").strip()
+    first_name = (data.get("first_name") or "").strip()[:100]
+    last_name = (data.get("last_name") or "").strip()[:100]
+    email = (data.get("email") or "").strip().lower()[:254]
+    role = (data.get("role") or "").strip()
+
+    if not code or not first_name or not last_name or not email:
+        return jsonify({"error": "code, first_name, last_name, and email are required."}), 400
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Invalid email format."}), 400
+    if role not in _COACH_REGISTER_VALID_ROLES:
+        return jsonify({"error": f"role must be one of: {', '.join(_COACH_REGISTER_VALID_ROLES)}."}), 400
+
+    db = get_db()
+    try:
+        school = db.execute(
+            "SELECT school_id, school_name, coach_invite_code_expires_at "
+            "FROM schools WHERE coach_invite_code = ? AND deleted_at IS NULL",
+            (code,),
+        ).fetchone()
+        if school is None:
+            return jsonify({"error": "Invalid or expired invite code."}), 400
+
+        # Expiry check — string comparison works for ISO-8601 timestamps.
+        expires_at = school["coach_invite_code_expires_at"]
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if expires_at and expires_at < now_iso:
+            return jsonify({"error": "Invalid or expired invite code."}), 400
+
+        dup = db.execute("SELECT user_id FROM users WHERE email = ?", (email,)).fetchone()
+        if dup is not None:
+            return jsonify({"error": "An account with that email already exists."}), 409
+
+        ts = now_utc()
+        invite_token_plain = secrets.token_urlsafe(32)
+        invite_token_hash = hashlib.sha256(invite_token_plain.encode()).hexdigest()
+        invite_expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+
+        cur = db.execute(
+            """INSERT INTO users
+               (role, first_name, last_name, email, active_status,
+                password_reset_token, password_reset_expires_at, created_at)
+               VALUES (?, ?, ?, ?, FALSE, ?, ?, ?)""",
+            (role, first_name, last_name, email,
+             invite_token_hash, invite_expires, ts),
+        )
+        new_user_id = cur.lastrowid
+
+        sp_cur = db.execute(
+            """INSERT INTO staff_profiles
+               (user_id, status, created_at) VALUES (?, 'active', ?)""",
+            (new_user_id, ts),
+        )
+        staff_id = sp_cur.lastrowid
+
+        db.execute(
+            """INSERT INTO staff_assignments
+               (staff_id, school_id, assignment_role, start_date, active_status, created_at)
+               VALUES (?, ?, ?, ?, TRUE, ?)""",
+            (staff_id, school["school_id"], role, ts[:10], ts),
+        )
+
+        audit(db, new_user_id, "coach_self_register", "users", new_user_id,
+              new_values={"role": role, "school_id": school["school_id"],
+                          "ip": request.remote_addr})
+
+        # C14 — notify org admins that a coach self-registered with the
+        # school's invite code, so they can verify the person actually
+        # belongs there.
+        try:
+            db.execute(
+                """INSERT INTO notifications
+                   (recipient_user_id, type, message, reference_table, reference_id, created_at)
+                   SELECT DISTINCT u.user_id,
+                          'coach_self_registered',
+                          ?, 'users', ?, ?
+                   FROM users u
+                   JOIN staff_profiles sp ON sp.user_id = u.user_id
+                   JOIN staff_assignments sa ON sa.staff_id = sp.staff_id
+                        AND sa.active_status = TRUE AND sa.deleted_at IS NULL
+                   JOIN schools sa_sc ON sa_sc.school_id = sa.school_id
+                   JOIN schools sc ON sc.school_id = ?
+                   WHERE u.role IN ('ceo','admin','coach_overseer')
+                     AND sa_sc.organization_id = sc.organization_id
+                     AND u.deleted_at IS NULL""",
+                (
+                    f"Coach {first_name} {last_name} ({email}) self-registered at {school['school_name']} via invite code",
+                    new_user_id, now_utc(), school["school_id"],
+                ),
+            )
+        except Exception:
+            pass
+
+        db.commit()
+
+        # Best-effort invite email — graceful no-op without GMAIL_APP_PASSWORD.
+        try:
+            from app.email import send_invite_email
+            send_invite_email(email, first_name or "there", role, invite_token_plain)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "coach_register: invite email send failed for %s", email
+            )
+
+        return jsonify({"ok": True, "school_id": school["school_id"]}), 201
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/logout
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/logout", methods=["POST"])
+def logout():
+    """Clear the session. Safe to call even when not logged in."""
+    session.clear()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/change-password
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/change-password", methods=["POST"])
+@limiter.limit("5 per minute")
+def change_password():
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    data = parse_json()
+    current_pw = data.get("current_password") or ""
+    new_pw = data.get("new_password") or ""
+
+    if not current_pw or not new_pw:
+        return jsonify({"error": "current_password and new_password are required."}), 400
+    if len(new_pw) < 8:
+        return jsonify({"error": "New password must be at least 8 characters."}), 400
+
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT password_hash FROM users WHERE user_id = ? AND deleted_at IS NULL",
+            (user["user_id"],),
+        ).fetchone()
+        if not row or not check_password_hash(row["password_hash"], current_pw):
+            return jsonify({"error": "Current password is incorrect."}), 400
+
+        new_hash = generate_password_hash(new_pw, method="pbkdf2:sha256")
+        db.execute(
+            "UPDATE users SET password_hash = ? WHERE user_id = ?",
+            (new_hash, user["user_id"]),
+        )
+        audit(db, user["user_id"], "change_password", "users", user["user_id"])
+        db.commit()
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/setup-admin
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/setup-admin", methods=["POST"])
+@limiter.limit("3 per hour")
+def setup_admin():
+    """
+    Create the first CEO or admin account.
+
+    Fails if any admin/ceo user already exists (prevents privilege escalation).
+
+    Body: { first_name, last_name, email, password, role }
+    role must be 'ceo' or 'admin'.
+    """
+    db = get_db()
+    try:
+        existing = db.execute(
+            "SELECT user_id FROM users WHERE role IN ('ceo', 'admin') AND deleted_at IS NULL LIMIT 1"
+        ).fetchone()
+        if existing:
+            return jsonify({"error": "An admin account already exists. Use the login page."}), 409
+
+        data = parse_json()
+        first_name = (data.get("first_name") or "").strip()
+        last_name = (data.get("last_name") or "").strip()
+        email = (data.get("email") or "").strip().lower()
+        password = data.get("password") or ""
+        role = (data.get("role") or "").strip().lower()
+
+        if not all([first_name, last_name, email, password]):
+            return jsonify({"error": "first_name, last_name, email, and password are required."}), 400
+
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return jsonify({"error": "Invalid email format."}), 400
+
+        if role != "admin":
+            return jsonify({"error": "role must be 'admin'. CEO accounts are created by an existing admin."}), 400
+
+        if len(password) < 8:
+            return jsonify({"error": "Password must be at least 8 characters."}), 400
+
+        # Check email not already taken.
+        dup = db.execute(
+            "SELECT user_id FROM users WHERE email = ? AND deleted_at IS NULL", (email,)
+        ).fetchone()
+        if dup:
+            return jsonify({"error": "An account with that email already exists."}), 409
+
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+        cur = db.execute(
+            """INSERT INTO users (role, first_name, last_name, email, password_hash,
+                                  active_status, created_at)
+               VALUES (?, ?, ?, ?, ?, TRUE, ?)""",
+            (role, first_name, last_name, email, password_hash, now_utc()),
+        )
+        new_id = cur.lastrowid
+        audit(db, new_id, "INSERT", "users", new_id,
+              new_values={"role": role, "email": email, "action": "setup_admin"})
+        db.commit()
+
+        user = db.execute(
+            "SELECT user_id, role, first_name, last_name, email, active_status FROM users WHERE user_id = ?",
+            (new_id,),
+        ).fetchone()
+
+        return jsonify({"ok": True, "user": {
+            "user_id": user["user_id"], "role": user["role"],
+            "first_name": user["first_name"], "last_name": user["last_name"],
+            "email": user["email"], "active_status": user["active_status"],
+        }}), 201
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/auth/session
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/session", methods=["GET"])
+def get_session():
+    """
+    Return the currently authenticated user, or 401 if not logged in.
+    Used by the SPA on page load to hydrate auth state.
+    """
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required."}), 401
+    return jsonify({"ok": True, "user": serialize_user(dict(user))})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/forgot-password
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/forgot-password", methods=["POST"])
+@limiter.limit("5 per minute")
+def forgot_password():
+    """
+    Generate a password reset token and store it in the database.
+
+    Always returns { ok: true } to avoid leaking whether an email exists.
+    In production, an email would be sent with the reset link — that
+    integration is wired up separately (email provider config).
+
+    Body: { email }
+    """
+    data = parse_json()
+    email = (data.get("email") or "").strip().lower()
+
+    if not email:
+        return jsonify({"error": "Email is required."}), 400
+
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Invalid email format."}), 400
+
+    db = get_db()
+    try:
+        # C13: pending-invite users (active_status=FALSE, no password_hash)
+        # are eligible for forgot-password too — they just get a fresh
+        # invite link instead of a reset link. Don't filter by active_status.
+        row = db.execute(
+            "SELECT user_id, first_name, role, active_status, password_hash "
+            "FROM users WHERE email = ? AND deleted_at IS NULL",
+            (email,),
+        ).fetchone()
+
+        if row:
+            is_pending = not row["password_hash"]
+            token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            # Pending users get a 24h invite token; existing users get a 1h reset token.
+            ttl_hours = 24 if is_pending else 1
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=ttl_hours)).isoformat()
+            db.execute(
+                """UPDATE users
+                   SET password_reset_token = ?, password_reset_expires_at = ?
+                   WHERE user_id = ?""",
+                (token_hash, expires_at, row["user_id"]),
+            )
+            audit(db, row["user_id"],
+                  "invite_resent" if is_pending else "forgot_password",
+                  "users", row["user_id"],
+                  new_values={"ip": request.remote_addr,
+                              "pending_invite": is_pending})
+            db.commit()
+
+            if is_pending:
+                from app.email import send_invite_email
+                send_invite_email(email, row["first_name"] or "there",
+                                  row["role"] or "staff", token)
+            else:
+                from app.email import send_password_reset_email
+                send_password_reset_email(email, row["first_name"] or "there", token)
+
+        # Jitter prevents timing-based email enumeration — always delay ~100ms regardless of whether user exists.
+        time.sleep(random.uniform(0.08, 0.15))
+        return jsonify({"ok": True})
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/reset-password
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/reset-password", methods=["POST"])
+@limiter.limit("10 per minute")
+def reset_password():
+    """
+    Validate a reset token and update the user's password.
+
+    Body: { token, password }
+    Token must exist and not be expired. Password must be at least 8 chars.
+    Clears the token after successful reset.
+    """
+    data = parse_json()
+    token = (data.get("token") or "").strip()
+    password = data.get("password") or ""
+
+    if not token:
+        return jsonify({"error": "Reset token is required."}), 400
+
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters."}), 400
+
+    db = get_db()
+    try:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        row = db.execute(
+            """SELECT user_id, password_reset_expires_at
+               FROM users
+               WHERE password_reset_token = ? AND deleted_at IS NULL""",
+            (token_hash,),
+        ).fetchone()
+
+        if row is None:
+            return jsonify({"error": "Invalid or expired reset token."}), 400
+
+        # Check expiry.
+        expires_raw = row["password_reset_expires_at"]
+        if expires_raw:
+            # Handle both offset-aware and naive datetimes from the DB.
+            if isinstance(expires_raw, str):
+                expires_dt = datetime.fromisoformat(expires_raw)
+            else:
+                expires_dt = expires_raw
+            # Make timezone-aware if naive.
+            if expires_dt.tzinfo is None:
+                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > expires_dt:
+                return jsonify({"error": "Reset token has expired. Please request a new one."}), 400
+
+        new_hash = generate_password_hash(password, method="pbkdf2:sha256")
+        # Re-fetch row to determine if this is an invite-completion (user has no
+        # password_hash yet) or a normal password reset for an existing active user.
+        # Only invite-completion should set active_status=TRUE; normal resets must
+        # not silently re-activate a deactivated account.
+        cur_row = db.execute(
+            "SELECT password_hash, active_status FROM users WHERE user_id = ?",
+            (row["user_id"],),
+        ).fetchone()
+        is_invite_completion = (
+            cur_row is not None and not cur_row["password_hash"]
+        )
+        if is_invite_completion:
+            db.execute(
+                """UPDATE users
+                   SET password_hash = ?,
+                       active_status = TRUE,
+                       email_verified = TRUE,
+                       password_reset_token = NULL,
+                       password_reset_expires_at = NULL
+                   WHERE user_id = ?""",
+                (new_hash, row["user_id"]),
+            )
+        else:
+            # Normal password reset — preserve active_status (admin may have
+            # intentionally deactivated this user).
+            db.execute(
+                """UPDATE users
+                   SET password_hash = ?,
+                       password_reset_token = NULL,
+                       password_reset_expires_at = NULL
+                   WHERE user_id = ?""",
+                (new_hash, row["user_id"]),
+            )
+        audit(db, row["user_id"], "reset_password", "users", row["user_id"])
+        db.commit()
+
+        return jsonify({"ok": True, "message": "Password updated successfully."})
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/parent-register/verify-student
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/parent-register/verify-student", methods=["POST"])
+@limiter.limit("10 per minute")
+def parent_register_verify_student():
+    """
+    Verify a student's identity for parent self-registration.
+    Body: { student_first_name, student_last_name, student_id }
+
+    student_id may be either:
+      - the Ufit-generated integer student_id (e.g. 94), OR
+      - the school district's local_student_identifier (e.g. 'LAUSD-2026-0123'),
+        which districts already communicate to parents via report cards / portal.
+    Tries integer match first; falls back to text match against
+    students.local_student_identifier.
+    """
+    data = parse_json()
+    first = (data.get("student_first_name") or "").strip()
+    last = (data.get("student_last_name") or "").strip()
+    student_id_raw = (str(data.get("student_id") or "")).strip()
+
+    if not student_id_raw:
+        return jsonify({"error": "Student ID is required."}), 400
+    if not first or not last:
+        return jsonify({"error": "Student first and last name are required."}), 400
+
+    # Try integer (Ufit-generated student_id). If that fails or finds nothing,
+    # fall back to local_student_identifier text match.
+    int_student_id = None
+    try:
+        int_student_id = int(student_id_raw)
+    except ValueError:
+        int_student_id = None
+
+    db = get_db()
+    try:
+        row = None
+        if int_student_id is not None:
+            row = db.execute(
+                """SELECT s.student_id, s.school_id, s.parent_primary_id, s.parent_secondary_id,
+                          sc.school_name
+                   FROM students s
+                   JOIN schools sc ON sc.school_id = s.school_id
+                   WHERE s.student_id = ?
+                     AND LOWER(s.student_first_name) = LOWER(?)
+                     AND LOWER(s.student_last_name) = LOWER(?)
+                     AND s.deleted_at IS NULL
+                     AND s.active_status = TRUE
+                     AND sc.deleted_at IS NULL""",
+                (int_student_id, first, last),
+            ).fetchone()
+
+        if not row:
+            # Fall back to local_student_identifier match (case-insensitive)
+            row = db.execute(
+                """SELECT s.student_id, s.school_id, s.parent_primary_id, s.parent_secondary_id,
+                          sc.school_name
+                   FROM students s
+                   JOIN schools sc ON sc.school_id = s.school_id
+                   WHERE LOWER(s.local_student_identifier) = LOWER(?)
+                     AND LOWER(s.student_first_name) = LOWER(?)
+                     AND LOWER(s.student_last_name) = LOWER(?)
+                     AND s.deleted_at IS NULL
+                     AND s.active_status = TRUE
+                     AND sc.deleted_at IS NULL""",
+                (student_id_raw, first, last),
+            ).fetchone()
+
+        if not row:
+            audit(db, None, "parent_register_verify_failed", "students", int_student_id,
+                  new_values={"reason": "student_not_found", "id_input": student_id_raw[:50],
+                              "ip": request.remote_addr})
+            db.commit()
+            return jsonify({
+                "error": "We couldn't find that student. Please check the spelling and ID, or contact your school."
+            }), 404
+
+        # Bind the verified student to this session — the create endpoint will only
+        # accept a student_id that matches the most recent successful verify in the
+        # same session. Prevents an attacker from calling create with a guessed
+        # student_id without going through verify first, AND prevents replay across
+        # different visitors who happened to verify different students.
+        session["pending_parent_student_id"] = row["student_id"]
+        session["pending_parent_school_id"] = row["school_id"]
+        session.permanent = True
+
+        audit(db, None, "parent_register_verify_ok", "students", row["student_id"],
+              new_values={"ip": request.remote_addr})
+        db.commit()
+
+        return jsonify({
+            "ok": True,
+            "student_id": row["student_id"],
+            "school_id": row["school_id"],
+            "school_name": row["school_name"],
+            "primary_filled": row["parent_primary_id"] is not None,
+            "secondary_filled": row["parent_secondary_id"] is not None,
+        })
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/parent-register/create
+# ---------------------------------------------------------------------------
+@auth_bp.route("/api/auth/parent-register/create", methods=["POST"])
+@limiter.limit("5 per minute")
+def parent_register_create():
+    """
+    Create a parent account after student verification has succeeded.
+    Body: { student_id, first_name, last_name, email, phone, password, relationship }
+    Re-verifies student exists to prevent tampering between verify and create.
+    Auto-logs the parent in on success.
+    """
+    import logging
+    data = parse_json()
+    student_id_raw = data.get("student_id")
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    phone = (data.get("phone") or "").strip()
+    password = data.get("password") or ""
+    relationship = (data.get("relationship") or "").strip().lower()
+
+    try:
+        student_id = int(student_id_raw)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid student ID."}), 400
+
+    # SEC-002: require that this session previously verified the SAME student.
+    # Without this, an attacker can call create directly with a guessed student_id.
+    pending_student_id = session.get("pending_parent_student_id")
+    if pending_student_id is None or int(pending_student_id) != student_id:
+        return jsonify({
+            "error": "Please verify your child's information first."
+        }), 403
+
+    if not all([first_name, last_name, email, password]):
+        return jsonify({"error": "All fields are required."}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters."}), 400
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"error": "Invalid email format."}), 400
+    if relationship not in ("mother", "father", "guardian", "other"):
+        relationship = "guardian"
+
+    db = get_db()
+    try:
+        student = db.execute(
+            """SELECT s.student_id, s.school_id, s.parent_primary_id, s.parent_secondary_id,
+                      sc.school_name
+               FROM students s
+               JOIN schools sc ON sc.school_id = s.school_id
+               JOIN organizations o ON o.organization_id = sc.organization_id
+               WHERE s.student_id = ? AND s.deleted_at IS NULL AND s.active_status = TRUE
+                 AND sc.deleted_at IS NULL AND o.deleted_at IS NULL""",
+            (student_id,),
+        ).fetchone()
+        if not student:
+            return jsonify({"error": "Student not found."}), 404
+
+        # Check for ANY row with this email — UNIQUE constraint on users.email applies
+        # regardless of soft-delete state, so we cannot INSERT around it.
+        existing = db.execute(
+            "SELECT user_id, deleted_at FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+        if existing:
+            # SEC-004: don't leak whether the email is registered. Generic 400 message
+            # mirrors what an attacker would see for any other validation error.
+            audit(db, None, "parent_register_create_blocked", "users", existing["user_id"],
+                  new_values={"reason": "email_in_use", "ip": request.remote_addr})
+            db.commit()
+            return jsonify({
+                "error": "We couldn't create your account with that information. Please try again or contact your school."
+            }), 400
+
+        ts = now_utc()
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+
+        u_cur = db.execute(
+            """INSERT INTO users (first_name, last_name, email, phone, password_hash,
+                                  role, active_status, email_verified, created_at)
+               VALUES (?, ?, ?, ?, ?, 'parent', TRUE, TRUE, ?)""",
+            (first_name, last_name, email, phone or None, password_hash, ts),
+        )
+        user_id = u_cur.lastrowid
+
+        p_cur = db.execute(
+            """INSERT INTO parents (user_id, first_name, last_name, email, phone,
+                                    notes, portal_access_status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)""",
+            (user_id, first_name, last_name, email, phone or None,
+             f"Relationship: {relationship}", ts),
+        )
+        parent_id = p_cur.lastrowid
+
+        # SEC-003 / DATA-003: conditional UPDATEs prevent two concurrent registrations
+        # from both observing the same NULL slot and overwriting each other.
+        # Try primary first; if rowcount==0 (someone else got it), try secondary.
+        primary_res = db.execute(
+            """UPDATE students SET parent_primary_id = ?
+               WHERE student_id = ? AND parent_primary_id IS NULL""",
+            (parent_id, student_id),
+        )
+        linked = primary_res.rowcount > 0
+        if not linked:
+            secondary_res = db.execute(
+                """UPDATE students SET parent_secondary_id = ?
+                   WHERE student_id = ? AND parent_secondary_id IS NULL""",
+                (parent_id, student_id),
+            )
+            linked = secondary_res.rowcount > 0
+        # If both slots filled, parent record exists but is unlinked. Leave a note in
+        # parents.notes so an admin can resolve manually.
+        if not linked:
+            db.execute(
+                """UPDATE parents SET notes = ? WHERE parent_id = ?""",
+                (f"Relationship: {relationship} | UNLINKED — both parent slots full on student {student_id}",
+                 parent_id),
+            )
+
+        audit(db, user_id, "parent_self_register", "users", user_id,
+              new_values={"student_id": student_id, "school_id": student["school_id"],
+                          "linked": linked})
+
+        # C14 — notify org admins so they know a new parent registered
+        # (especially relevant when "linked: false" because both parent
+        # slots were full and an admin needs to manually resolve it).
+        try:
+            db.execute(
+                """INSERT INTO notifications
+                   (recipient_user_id, type, message, reference_table, reference_id, created_at)
+                   SELECT DISTINCT u.user_id,
+                          'parent_registered',
+                          ? ,
+                          'users', ?, ?
+                   FROM users u
+                   JOIN staff_profiles sp ON sp.user_id = u.user_id
+                   JOIN staff_assignments sa ON sa.staff_id = sp.staff_id
+                        AND sa.active_status = TRUE AND sa.deleted_at IS NULL
+                   JOIN schools sa_sc ON sa_sc.school_id = sa.school_id
+                   JOIN schools sc ON sc.school_id = ?
+                   WHERE u.role IN ('ceo','admin','coach_overseer')
+                     AND sa_sc.organization_id = sc.organization_id
+                     AND u.deleted_at IS NULL""",
+                (
+                    f"Parent {first_name} {last_name} registered for student at {student['school_name']}"
+                    + ("" if linked else " — both parent slots were full; manual resolution needed."),
+                    user_id, now_utc(), student["school_id"],
+                ),
+            )
+        except Exception:
+            # Notifications are best-effort; don't block registration.
+            pass
+
+        db.commit()
+
+        # Auto-login: rotate session ID to prevent session-fixation (SEC-006).
+        # Flask's session is signed-cookie-based, so .clear() + new SID isn't directly
+        # available, but clearing and re-setting permanent=True with a new key prefix
+        # forces the cookie to be re-issued on the next response.
+        session.clear()
+        session["user_id"] = user_id
+        session["role"] = "parent"
+        session["_session_id"] = secrets.token_urlsafe(16)
+        session.permanent = True
+
+        # Fire HubSpot sync in background — non-blocking, errors swallowed.
+        try:
+            from app.routes._hubspot import notify_parent_registered
+            import threading
+            threading.Thread(
+                target=notify_parent_registered,
+                args=({
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "email": email,
+                    "phone": phone,
+                    "relationship": relationship,
+                    "school_name": student["school_name"],
+                },),
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Parent HubSpot sync failed to launch: %s", exc)
+
+        return jsonify({"ok": True, "user_id": user_id})
+    finally:
+        db.close()
