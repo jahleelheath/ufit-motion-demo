@@ -10,7 +10,6 @@ services:
   - type: web
     name: ufit-motion-demo
     runtime: python
-    pythonVersion: "3.12.0"
     plan: free
     buildCommand: pip install -r requirements.txt
     # Same gunicorn reasoning as production: 120s timeout so Render's health check does
@@ -19,6 +18,10 @@ services:
     startCommand: gunicorn wsgi:app --workers 1 --threads 4 --timeout 120 --bind "0.0.0.0:$PORT"
     healthCheckPath: /api/health
     envVars:
+      # Render blueprints take the interpreter version as an env var; a top-level
+      # pythonVersion key is rejected with "field pythonVersion not found".
+      - key: PYTHON_VERSION
+        value: "3.12.0"
       - key: APP_ENV
         value: development
       - key: DB_PATH
