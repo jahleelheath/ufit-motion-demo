@@ -100,16 +100,43 @@
       if (!btn) return;
       var email = btn.getAttribute('data-demo-email');
       var portal = btn.getAttribute('data-demo-portal');
-      // Deep link straight into the app: if the login form is not mounted yet,
-      // route to /login and retry once it is.
+
+      // Switching roles from inside the app is the common case: a founder clicks
+      // through all four. The session survives a route change, so the SPA just
+      // re-renders the dashboard and the click looks like it did nothing. Drop the
+      // session first, then land on a real login form.
       if (!document.querySelector('#login-form')) {
-        history.pushState({}, '', '/login');
-        window.dispatchEvent(new PopStateEvent('popstate'));
-        setTimeout(function () { signIn(email, portal); }, 400);
+        fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin'
+        }).catch(function () {}).then(function () {
+          try {
+            sessionStorage.setItem('demoAutoLogin', JSON.stringify({ email: email, portal: portal }));
+          } catch (_) {}
+          location.href = '/login';
+        });
         return;
       }
       signIn(email, portal);
     });
+
+    // Resume the sign-in the logout above interrupted.
+    (function resumeAfterLogout() {
+      var raw;
+      try { raw = sessionStorage.getItem('demoAutoLogin'); } catch (_) { return; }
+      if (!raw) return;
+      try { sessionStorage.removeItem('demoAutoLogin'); } catch (_) {}
+      var want;
+      try { want = JSON.parse(raw); } catch (_) { return; }
+      var tries = 0;
+      (function attempt() {
+        if (document.querySelector('#login-form')) { signIn(want.email, want.portal); return; }
+        if (++tries > 40) return;   // ~6s, then give up rather than spin
+        setTimeout(attempt, 150);
+      })();
+    })();
+
   })();
   </script>
   {% endif %}

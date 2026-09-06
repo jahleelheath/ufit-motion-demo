@@ -87,3 +87,17 @@ def test_each_role_button_carries_the_portal_the_api_expects(monkeypatch, tmp_pa
     for email, portal in expected.items():
         needle = f'data-demo-email="{email}" data-demo-portal="{portal}"'
         assert needle in html, f"{email} must post portal={portal}"
+
+
+def test_role_switch_clears_the_session_first(monkeypatch, tmp_path):
+    """Clicking a role while already signed in must log out before signing in.
+
+    The session survives a client-side route change, so without this the SPA just
+    re-renders the current dashboard and the click appears to do nothing. Found by
+    clicking Admin while signed in as the head coach on the deployed instance.
+    """
+    c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw-for-test")
+    html = c.get("/login").get_data(as_text=True)
+    assert "/api/auth/logout" in html
+    # The intended sign-in has to survive the reload that logout triggers.
+    assert "demoAutoLogin" in html
