@@ -133,3 +133,59 @@ def test_seeded_assessment_window_status_matches_its_dates(monkeypatch, tmp_path
             assert end >= today, f"{name} is active but ended {end}"
         if status == "closed":
             assert end < today, f"{name} is closed but ends {end}"
+
+
+def test_stale_demo_dates_are_repaired_on_boot(monkeypatch, tmp_path):
+    """A long-lived demo instance must not advertise a window that already closed.
+
+    init_db is idempotent by design, so a database seeded once keeps its original
+    dates forever. On a demo that is the first thing a visitor sees. The refresh
+    step re-anchors the windows on every boot.
+    """
+    import datetime
+
+    from app.database import get_db
+
+    db_path = tmp_path / "demo.db"
+    c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw")
+    with c.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE assessment_windows SET end_date = ? WHERE status = 'active'",
+            ("2020-01-01",),
+        )
+        db.commit()
+
+    # Boot again against the same database, exactly as a restart would.
+    c2 = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw")
+    with c2.application.app_context():
+        rows = get_db().execute(
+            "SELECT end_date FROM assessment_windows WHERE status = 'active'"
+        ).fetchall()
+
+    assert rows
+    today = datetime.date.today()
+    for row in rows:
+        assert datetime.date.fromisoformat(str(row["end_date"])[:10]) >= today
+
+
+def test_date_refresh_refuses_against_a_real_database(monkeypatch, tmp_path):
+    """The refresh writes rows, so it must never run against real records."""
+    from app.database import get_db
+    from app.seeds import _refresh_demo_dates
+
+    c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw")
+    with c.application.app_context():
+        db = get_db()
+        db.execute(
+            "UPDATE assessment_windows SET end_date = ? WHERE status = 'active'",
+            ("2020-01-01",),
+        )
+        db.commit()
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@example.invalid:5432/db")
+        _refresh_demo_dates(db)
+        row = db.execute(
+            "SELECT end_date FROM assessment_windows WHERE status = 'active'"
+        ).fetchone()
+
+    assert str(row["end_date"])[:10] == "2020-01-01", "must not rewrite a real database"

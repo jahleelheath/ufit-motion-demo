@@ -70,6 +70,7 @@ def init_db() -> None:
             ensure_column(db, "eod_reports", col[0], col[1])
         _seed_default_admin(db)
         _seed_demo_users(db)
+        _refresh_demo_dates(db)
         _seed_app_settings(db)
         print("Database initialized.", flush=True)
     except Exception as exc:
@@ -764,3 +765,41 @@ def _seed_app_settings(db) -> None:
         except Exception as exc:
             db.rollback()
             print(f"[seeds] Could not commit app_settings: {exc}", file=sys.stderr, flush=True)
+
+
+def _refresh_demo_dates(db) -> None:
+    """Re-anchor the demo's assessment windows to today, on every boot.
+
+    init_db is idempotent, which is correct: it must not clobber a real database.
+    The consequence is that a demo instance seeded once keeps its original dates
+    forever, and the coach dashboard ends up advertising an "active" window that
+    closed weeks ago. That is exactly what a visitor sees first.
+
+    So under DEMO_MODE only, and only when DATABASE_URL is absent, the windows are
+    re-anchored relative to today. Guarded on both because this rewrites rows, and
+    it must never touch a database holding real records.
+    """
+    if os.environ.get("DEMO_MODE", "").lower() not in ("1", "true", "yes"):
+        return
+    if os.environ.get("DATABASE_URL"):
+        return
+
+    # seeds.py imports datetime inside functions, not at module level.
+    import datetime
+
+    today = datetime.date.today()
+    windows = {
+        "Baseline Assessment": (today - datetime.timedelta(days=45),
+                                today - datetime.timedelta(days=31)),
+        "Mid-Year Assessment": (today - datetime.timedelta(days=20),
+                                today + datetime.timedelta(days=10)),
+    }
+    for name, (start, end) in windows.items():
+        db.execute(
+            "UPDATE assessment_windows SET start_date = ?, end_date = ? WHERE window_name = ?",
+            (start.isoformat(), end.isoformat(), name),
+        )
+    # init_db closes the connection in a finally block without committing, so an
+    # uncommitted UPDATE here is silently rolled back and the dates never move.
+    db.commit()
+    print("[seeds] Demo assessment windows re-anchored to today.")
