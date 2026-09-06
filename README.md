@@ -9,12 +9,18 @@ Flask 3.1 and PostgreSQL on Supabase in production, deployed on Render.
 
 ## This repository is the demo build
 
-It is a snapshot published so the work can be inspected and clicked. It runs on SQLite and
-seeds its own fabricated data on every boot. **No real student record exists in this repo or
-on the demo instance.** That is enforced by configuration, not by memory: `render-demo.yaml`
-never sets `DATABASE_URL`, so `app/database.py` falls back to SQLite and re-seeds on cold
-boot. A public demo of a FERPA-scoped product must not be one environment variable away from
-carrying FERPA data.
+It is a snapshot published so the work can be inspected and clicked. It runs on SQLite with
+fabricated seed data. **No real student record exists in this repo or on the demo instance.**
+That is enforced by configuration, not by memory: the root `render.yaml` never sets
+`DATABASE_URL`, so `app/database.py` takes the SQLite path. A public demo of a FERPA-scoped
+product must not be one environment variable away from carrying FERPA data.
+
+Seeding is idempotent, so it populates once and then leaves the database alone, which is the
+correct behaviour for a real deployment. The cost on a long-lived demo is that dates go stale
+and the dashboard starts advertising an assessment window that closed weeks ago. So under
+`DEMO_MODE`, and only when `DATABASE_URL` is absent, `_refresh_demo_dates()` re-anchors those
+windows on every boot. Both guards are tested, including the one that matters: it refuses to
+rewrite anything when a real database is configured.
 
 ## Demo logins
 
