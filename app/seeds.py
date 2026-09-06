@@ -448,8 +448,12 @@ def _seed_demo_users(db) -> None:
         # ── 10. Assessment windows ────────────────────────────────────────────
         baseline_start = (today - datetime.timedelta(days=45)).isoformat()
         baseline_end   = (today - datetime.timedelta(days=31)).isoformat()
+        # The mid-year window is seeded with status 'active', so its end date has to
+        # be in the future or the dashboard advertises an active window that already
+        # closed. The demo re-seeds on every cold boot, so anchoring both ends to
+        # today keeps it truthful however long the instance has been up.
         midyear_start  = (today - datetime.timedelta(days=20)).isoformat()
-        midyear_end    = (today - datetime.timedelta(days=4)).isoformat()
+        midyear_end    = (today + datetime.timedelta(days=10)).isoformat()
 
         cur = db.execute(
             """INSERT INTO assessment_windows (school_id, program_id, window_name,

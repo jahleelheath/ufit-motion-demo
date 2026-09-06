@@ -55,7 +55,7 @@ against a real database renders nothing and leaks nothing.
   unconfigured environment cannot be used to create schools.
 - `app/routes/_helpers.py` — `audit()` deliberately does not commit, so the audit row and the
   business write land in one transaction. A missing audit entry is a FERPA violation.
-- `tests/` — 8,960 lines across 22 files against 11,442 lines of application code.
+- `tests/` — 9,095 lines across 23 files against 11,467 lines of application code.
 - `render.yaml` — the comments explain why the gunicorn timeout is 120 seconds and why one
   worker with four threads.
 

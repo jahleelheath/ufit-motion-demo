@@ -103,3 +103,33 @@ def test_role_switch_clears_the_session_first(monkeypatch, tmp_path):
     # stale session and the click silently did nothing.
     assert "_doLogout" in html
     assert "whenLoginReady" in html
+
+
+def test_seeded_assessment_window_status_matches_its_dates(monkeypatch, tmp_path):
+    """An 'active' window whose end date has passed is a visible contradiction.
+
+    The demo re-seeds on every cold boot, so windows are anchored relative to
+    today. The mid-year window was previously seeded ending four days ago while
+    still marked active, and the coach dashboard advertised it as the active
+    window. Caught by reading the deployed dashboard, not by any existing test.
+    """
+    import datetime
+
+    from app.database import get_db
+
+    c = _client(monkeypatch, tmp_path, DEMO_MODE="true", UFIT_SEED_PASSWORD="pw-for-test")
+    today = datetime.date.today()
+    with c.application.app_context():
+        db = get_db()
+        rows = db.execute(
+            "SELECT window_name, end_date, status FROM assessment_windows"
+        ).fetchall()
+
+    assert rows, "the demo seed must create assessment windows"
+    for row in rows:
+        name, end_date, status = row["window_name"], row["end_date"], row["status"]
+        end = datetime.date.fromisoformat(str(end_date)[:10])
+        if status == "active":
+            assert end >= today, f"{name} is active but ended {end}"
+        if status == "closed":
+            assert end < today, f"{name} is closed but ends {end}"

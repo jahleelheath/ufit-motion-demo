@@ -22,6 +22,11 @@ services:
       # pythonVersion key is rejected with "field pythonVersion not found".
       - key: PYTHON_VERSION
         value: "3.12.0"
+      # Deliberate. seeds.py refuses to create the demo accounts outside
+      # APP_ENV=development, so production here would leave the demo with no
+      # logins. The cost is SESSION_COOKIE_SECURE staying False; Render serves
+      # this over HTTPS only, so the cookie never travels in cleartext, and this
+      # instance holds nothing but seeded data. Noted rather than hidden.
       - key: APP_ENV
         value: development
       - key: DB_PATH
