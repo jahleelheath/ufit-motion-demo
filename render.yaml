@@ -1,5 +1,7 @@
-# Demo deployment of UFIT Motion.
-# Differs from render.yaml in exactly one way that matters: DATABASE_URL is never set,
+# Demo blueprint for UFIT Motion. Render reads this file at the repo root.
+# The production blueprint, which expects a Supabase DATABASE_URL, is render-production.yaml.
+#
+# This differs from the production blueprint in exactly one way that matters: DATABASE_URL is never set,
 # so app/database.py falls back to SQLite on the instance disk. On every cold boot the
 # app self-migrates and re-seeds Lincoln Elementary with fabricated students, sessions
 # and assessments. No real student record ever reaches this instance, which is the
