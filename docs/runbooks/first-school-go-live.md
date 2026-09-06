@@ -15,7 +15,7 @@
 | **A1** wipe script | ✓ tested | `scripts/production_wipe.py` — atomic TRUNCATE + first CEO from env vars |
 | **A2** Gmail SMTP | ✓ tested | `app/email.py` rewritten — replaces Resend with Gmail App Password |
 | **A3** Privacy + Terms | ✓ tested | `templates/privacy.html`, `templates/terms.html`, footer in SPA shell |
-| **A4** Help modal | ✓ tested | Help button in top-nav, `/api/feedback` posts to `operations@ufitonline.net` |
+| **A4** Help modal | ✓ tested | Help button in top-nav, `/api/feedback` posts to `operations@demo.com` |
 | **A5** Backup runbook | ✓ shipped | `docs/runbooks/backup-restore.md` — Supabase PITR drill procedure |
 | **B6** Multi-school picker | ✓ tested | Login returns `assignments[]`, picker UI, top-nav switcher chip |
 | **B7** Bulk coach invite | ✓ tested | `POST /api/admin/coaches/bulk-invite` paste-CSV with per-row errors |
@@ -78,14 +78,14 @@ Go to Render dashboard → `ufit-motion` → **Environment**.
 
 | Key | Value |
 |---|---|
-| `GMAIL_USER` | `operations@ufitonline.net` (or whichever Google Workspace mailbox you want as the sender) |
+| `GMAIL_USER` | `operations@demo.com` (or whichever Google Workspace mailbox you want as the sender) |
 | `GMAIL_APP_PASSWORD` | A 16-character Google App Password — generate at https://myaccount.google.com/apppasswords (you must have 2-Step Verification enabled on the account first) |
 
 **Required ONLY for the wipe step (Step 4 below) — temporary:**
 
 | Key | Value |
 |---|---|
-| `SUPER_ADMIN_EMAIL` | The CEO email (e.g. `ceo@ufitonline.net`) |
+| `SUPER_ADMIN_EMAIL` | The CEO email (e.g. `ceo@demo.com`) |
 | `SUPER_ADMIN_PASSWORD` | A strong 12+ character password (don't reuse) |
 | `SUPER_ADMIN_FIRST` | First name (e.g. `Miss`) |
 | `SUPER_ADMIN_LAST` | Last name (e.g. `A`) |
@@ -100,7 +100,7 @@ Click **Save Changes**. Render will redeploy automatically (~2 min).
 
 ⚠️ This **deletes all operational data** (organizations, schools, students, coaches, sessions, etc.) and creates the first CEO from the env vars in Step 3. Static data — skill catalog, app settings — survives.
 
-You're aware: per the design, this is intentional. Miss A's seeded account, the 30 demo students at Lincoln, the LAUSD demo data — everything goes.
+You're aware: per the design, this is intentional. the founder's seeded account, the 30 demo students at Lincoln, the LAUSD demo data — everything goes.
 
 Run from Render Shell:
 
@@ -198,7 +198,7 @@ None of these block first-school onboarding.
 - **A coach can't see a school they should** → check `/api/admin/audit-log?action=role_changed` and look at the `school_ids` field. If wrong, hit `PATCH /api/admin/users/<id>/role` with the correct `school_ids[]`.
 - **Database emergency** → `docs/runbooks/backup-restore.md` Path 2.
 
-For anything else, the in-app Help button in the top-nav posts straight to `operations@ufitonline.net`.
+For anything else, the in-app Help button in the top-nav posts straight to `operations@demo.com`.
 
 ---
 

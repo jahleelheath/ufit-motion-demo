@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import traceback
@@ -158,5 +159,25 @@ def create_app(config=None):
             init_db()
         except Exception as e:
             app.logger.error("init_db failed at startup: %s", e)
+
+    # Demo credential bar. Only ever renders on the public demo instance.
+    #
+    # The guard is deliberately not "is DEMO_MODE set". DATABASE_URL is what selects
+    # the Postgres backend that holds real student records, so if it is present this
+    # refuses to enable regardless of what DEMO_MODE says. A misconfigured env var
+    # must not be able to print a working password onto a page serving FERPA data.
+    @app.context_processor
+    def _demo_context():
+        demo_requested = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
+        on_real_database = bool(os.environ.get("DATABASE_URL"))
+        if demo_requested and on_real_database:
+            app.logger.error(
+                "DEMO_MODE requested while DATABASE_URL is set; refusing to enable it."
+            )
+        enabled = demo_requested and not on_real_database
+        return {
+            "demo_mode": enabled,
+            "demo_password": os.environ.get("UFIT_SEED_PASSWORD", "") if enabled else "",
+        }
 
     return app

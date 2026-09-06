@@ -21,7 +21,7 @@ import pytest
 
 def test_refuses_when_not_production_without_flag(monkeypatch):
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@ufitonline.net")
+    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@demo.com")
     monkeypatch.setenv("SUPER_ADMIN_PASSWORD", "x" * 12)
     monkeypatch.setenv("SUPER_ADMIN_FIRST", "Ada")
     monkeypatch.setenv("SUPER_ADMIN_LAST", "Lovelace")
@@ -86,7 +86,7 @@ def test_wipes_operational_data_and_creates_ceo(app, monkeypatch):
     from app.routes._helpers import now_utc
 
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@ufitonline.net")
+    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@demo.com")
     monkeypatch.setenv("SUPER_ADMIN_PASSWORD", "Sup3r$ecret!Pwd")
     monkeypatch.setenv("SUPER_ADMIN_FIRST", "Boss")
     monkeypatch.setenv("SUPER_ADMIN_LAST", "Lady")
@@ -128,7 +128,7 @@ def test_wipes_operational_data_and_creates_ceo(app, monkeypatch):
         ).fetchone()["c"]
         ceo_row = db.execute(
             "SELECT email, role, active_status FROM users WHERE email = ?",
-            ("ceo@ufitonline.net",),
+            ("ceo@demo.com",),
         ).fetchone()
         # The wipe nukes audit_log too; confirm.
         audit_count = db.execute(

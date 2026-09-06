@@ -172,7 +172,7 @@ def _seed_default_admin(db) -> None:
         return
 
     if existing:
-        # Already have an admin/ceo — make sure Miss A's CEO account exists too.
+        # Already have an admin/ceo — make sure the founder's CEO account exists too.
         _ensure_missa_ceo(db)
         return
 
@@ -203,10 +203,10 @@ def _seed_default_admin(db) -> None:
 
 def _ensure_missa_ceo(db) -> None:
     """
-    Seed Miss A's CEO account (Ufit founder) if it doesn't already exist.
-    Email: missa@ufitonline.com  Password: from UFIT_SEED_PASSWORD or default 'UfitDemo2026!'
+    Seed the founder's CEO account (Ufit founder) if it doesn't already exist.
+    Email: ceo@demo.com  Password: from UFIT_SEED_PASSWORD or default 'UfitDemo2026!'
 
-    Idempotent across deletion: if a soft-deleted Miss A row exists, restore it
+    Idempotent across deletion: if a soft-deleted the founder row exists, restore it
     rather than INSERTing (which would UNIQUE-violate on email).
     """
     from app.routes._helpers import now_utc
@@ -215,7 +215,7 @@ def _ensure_missa_ceo(db) -> None:
         # UNIQUE constraint on users.email applies regardless of deleted_at.
         existing = db.execute(
             "SELECT user_id, role, deleted_at FROM users WHERE email = ?",
-            ("missa@ufitonline.com",),
+            ("ceo@demo.com",),
         ).fetchone()
         ceo_password = os.environ.get("UFIT_SEED_PASSWORD", "UfitDemo2026!")
         ceo_hash = generate_password_hash(ceo_password, method="pbkdf2:sha256")
@@ -231,19 +231,19 @@ def _ensure_missa_ceo(db) -> None:
                     (ceo_hash, existing["user_id"]),
                 )
                 db.commit()
-                print("[seeds] Miss A CEO account restored from soft-delete.", flush=True)
+                print("[seeds] the founder CEO account restored from soft-delete.", flush=True)
             return
         db.execute(
             """INSERT INTO users (role, first_name, last_name, email, password_hash,
                                   active_status, email_verified, created_at)
-               VALUES ('ceo', 'Miss', 'A', 'missa@ufitonline.com', ?, TRUE, TRUE, ?)""",
+               VALUES ('ceo', 'Miss', 'A', 'ceo@demo.com', ?, TRUE, TRUE, ?)""",
             (ceo_hash, now_utc()),
         )
         db.commit()
-        print("[seeds] Miss A CEO account seeded: missa@ufitonline.com", flush=True)
+        print("[seeds] the founder CEO account seeded: ceo@demo.com", flush=True)
     except Exception as exc:
         db.rollback()
-        print(f"[seeds] Could not seed Miss A CEO: {exc}", file=sys.stderr, flush=True)
+        print(f"[seeds] Could not seed the founder CEO: {exc}", file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +719,7 @@ def _seed_demo_users(db) -> None:
 _DEFAULT_SETTINGS = [
     ("app_name", "Ufit Motion", True),
     ("app_version", "1.0.0", True),
-    ("support_email", "support@ufitonline.net", True),
+    ("support_email", "support@demo.com", True),
     ("eod_report_deadline_hour", "20", False),   # 8 PM local time cutoff
     ("max_session_duration_hours", "4", False),
     ("assessment_window_weeks", "6", False),

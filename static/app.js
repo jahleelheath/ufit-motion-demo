@@ -235,7 +235,7 @@ function showConfirm(message, onConfirm, opts = {}) {
 
 /**
  * In-app Help & Feedback modal — posts to /api/feedback so messages
- * land in operations@ufitonline.net. Captured page_url helps triage.
+ * land in operations@demo.com. Captured page_url helps triage.
  */
 function showHelpModal() {
   openModal(`
@@ -245,7 +245,7 @@ function showHelpModal() {
     </div>
     <div class="modal-body">
       <p style="margin:0 0 12px;color:var(--color-text-secondary);font-size:0.875rem;">
-        Need help, found a bug, or have feedback? Email <a href="mailto:operations@ufitonline.net" style="color:var(--color-primary);">operations@ufitonline.net</a> or send a message below.
+        Need help, found a bug, or have feedback? Email <a href="mailto:operations@demo.com" style="color:var(--color-primary);">operations@demo.com</a> or send a message below.
       </p>
       <form id="help-form" autocomplete="off">
         <div class="form-group">
@@ -275,7 +275,7 @@ function showHelpModal() {
         page_url: window.location.pathname + window.location.search,
       });
       closeModal();
-      showAlert('Thanks — your message was sent to operations@ufitonline.net.', 'success');
+      showAlert('Thanks — your message was sent to operations@demo.com.', 'success');
     } catch (err) {
       if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
       showAlert(err?.message || 'Could not send your message.', 'error');
@@ -3988,7 +3988,7 @@ async function loadCoachEvaluatePage(container) {
             </div>
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label" for="eval-email">Your Email (optional)</label>
-              <input class="form-input" id="eval-email" type="email" placeholder="coach@ufitonline.net" maxlength="200">
+              <input class="form-input" id="eval-email" type="email" placeholder="coach@demo.com" maxlength="200">
             </div>
           </div>
 

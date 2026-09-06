@@ -92,7 +92,7 @@ def test_wipe_truncates_and_creates_ceo(app, monkeypatch):
     """End-to-end against the SQLite test DB used by conftest."""
     from app.database import get_db
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@ufitonline.net")
+    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "ceo@demo.com")
     monkeypatch.setenv("SUPER_ADMIN_PASSWORD", "Sup3r$ecret!")
     monkeypatch.setenv("SUPER_ADMIN_FIRST", "Boss")
     monkeypatch.setenv("SUPER_ADMIN_LAST", "Lady")
@@ -109,7 +109,7 @@ def test_wipe_truncates_and_creates_ceo(app, monkeypatch):
     with app.app_context():
         db = get_db()
         org_count = db.execute("SELECT COUNT(*) c FROM organizations").fetchone()["c"]
-        ceo = db.execute("SELECT email, role FROM users WHERE email=?", ("ceo@ufitonline.net",)).fetchone()
+        ceo = db.execute("SELECT email, role FROM users WHERE email=?", ("ceo@demo.com",)).fetchone()
         skills = db.execute("SELECT COUNT(*) c FROM skills").fetchone()["c"]
         db.close()
     assert org_count == 0
@@ -259,7 +259,7 @@ Runbook documents Render Job invocation. Tests cover guard rails
 - Modify: `.env.example` (add `GMAIL_USER`, `GMAIL_APP_PASSWORD`)
 
 **Behavior:**
-- New env vars: `GMAIL_USER` (default `operations@ufitonline.net`), `GMAIL_APP_PASSWORD` (no default).
+- New env vars: `GMAIL_USER` (default `operations@demo.com`), `GMAIL_APP_PASSWORD` (no default).
 - If `GMAIL_APP_PASSWORD` unset → log to stdout, return True (existing graceful no-op).
 - If set → SMTP_SSL to `smtp.gmail.com:465`, login, sendmail, multipart/alternative with HTML + plaintext fallback.
 - `FROM_ADDRESS` becomes `Ufit Motion <{GMAIL_USER}>`.
@@ -288,15 +288,15 @@ def test_send_uses_smtplib_when_configured(monkeypatch):
         def __exit__(self, *a): pass
         def login(self, u, p): sent["login"]=(u,p)
         def sendmail(self, frm, to, msg): sent["sendmail"]=(frm,to,msg)
-    monkeypatch.setattr(email_mod, "GMAIL_USER", "ops@ufitonline.net")
+    monkeypatch.setattr(email_mod, "GMAIL_USER", "ops@demo.com")
     monkeypatch.setattr(email_mod, "GMAIL_APP_PASSWORD", "abcd efgh ijkl mnop")
     monkeypatch.setattr("smtplib.SMTP_SSL", FakeSMTP)
     ok = email_mod.send_invite_email("dst@x.com","Bo","head_coach","tok9")
     assert ok is True
     assert sent["host"] == "smtp.gmail.com"
     assert sent["port"] == 465
-    assert sent["login"][0] == "ops@ufitonline.net"
-    assert sent["sendmail"][0] == "ops@ufitonline.net"
+    assert sent["login"][0] == "ops@demo.com"
+    assert sent["sendmail"][0] == "ops@demo.com"
     assert sent["sendmail"][1] == ["dst@x.com"]
     assert b"Set My Password" in sent["sendmail"][2] or "Set My Password" in sent["sendmail"][2]
 ```
@@ -312,7 +312,7 @@ from email.mime.text import MIMEText
 from html import escape as _html_escape
 
 APP_BASE_URL = os.environ.get("UFIT_APP_BASE_URL", "http://localhost:5000")
-GMAIL_USER = os.environ.get("GMAIL_USER", "operations@ufitonline.net")
+GMAIL_USER = os.environ.get("GMAIL_USER", "operations@demo.com")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 FROM_ADDRESS = f"Ufit Motion <{GMAIL_USER}>"
 
@@ -378,7 +378,7 @@ def test_privacy_returns_200(client):
     assert resp.status_code == 200
     assert b"Privacy Policy" in resp.data
     assert b"FERPA" in resp.data
-    assert b"operations@ufitonline.net" in resp.data
+    assert b"operations@demo.com" in resp.data
 
 def test_terms_returns_200(client):
     resp = client.get("/terms")
@@ -405,10 +405,10 @@ def terms():
 Author `templates/privacy.html` (FERPA-aware boilerplate, ~600 words) and `templates/terms.html` (acceptable use, no warranty, governing law = California). Both must:
 - Inherit the same brand chrome (top blue bar with "UFIT MOTION").
 - Have last-updated date at top.
-- Include a "Contact: operations@ufitonline.net" section.
+- Include a "Contact: operations@demo.com" section.
 - Link back to `/` from a footer button.
 
-In `templates/index.html`, add a `<footer>` with links to `/privacy`, `/terms`, and `mailto:operations@ufitonline.net`. Keep it visible on the login screen and authenticated pages (the SPA renders one body — footer can sit outside the SPA root div).
+In `templates/index.html`, add a `<footer>` with links to `/privacy`, `/terms`, and `mailto:operations@demo.com`. Keep it visible on the login screen and authenticated pages (the SPA renders one body — footer can sit outside the SPA root div).
 
 **Step 4: Run — 2 PASS.**
 
@@ -436,7 +436,7 @@ Iteration assumed; no legal review yet."
 - `POST /api/feedback` body: `{ subject, message, page_url }`
 - Auth required (any logged-in user).
 - Rate-limited (`5 per minute` via `limiter`).
-- Server emails `operations@ufitonline.net` (via existing `_send`) with subject `[Ufit Feedback] <subject>` and body containing user email, role, page_url, message.
+- Server emails `operations@demo.com` (via existing `_send`) with subject `[Ufit Feedback] <subject>` and body containing user email, role, page_url, message.
 - Returns `{ ok: true }`.
 
 **Step 1: Failing test**
@@ -456,7 +456,7 @@ def test_feedback_sends_email(admin_client, monkeypatch):
         "subject":"login broken","message":"i cant log in","page_url":"/login"
     })
     assert resp.status_code == 200
-    assert sent and sent[0][0] == "operations@ufitonline.net"
+    assert sent and sent[0][0] == "operations@demo.com"
     assert "login broken" in sent[0][1]
 ```
 
@@ -465,7 +465,7 @@ def test_feedback_sends_email(admin_client, monkeypatch):
 **Step 3: Implement endpoint in `shared_routes.py`** (look for existing `@shared_bp` or matching blueprint pattern; add at bottom). Auth gate via `current_user()`. Email sender as above.
 
 **Step 4: Frontend** — add Help button to `static/app.js` topbar component. Open modal with `<form>` posting to `/api/feedback`. Modal includes:
-- "Need help? Email operations@ufitonline.net or use the form below."
+- "Need help? Email operations@demo.com or use the form below."
 - Subject input, textarea, Submit.
 - Auto-fills `page_url` from `location.pathname`.
 - Shows toast on success.
@@ -479,7 +479,7 @@ git add app/routes/shared_routes.py static/app.js static/styles.css tests/test_f
 git commit -m "feat(A4): in-app Help & Feedback modal
 
 Help button in top-nav opens modal posting to /api/feedback.
-Server emails operations@ufitonline.net via Gmail SMTP. Rate-
+Server emails operations@demo.com via Gmail SMTP. Rate-
 limited 5/min."
 ```
 

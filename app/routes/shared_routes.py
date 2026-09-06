@@ -375,7 +375,7 @@ def submit_feedback():
 
     try:
         from app.email import _send
-        _send("operations@ufitonline.net", f"[Ufit Feedback] {subject}", body_html)
+        _send("operations@demo.com", f"[Ufit Feedback] {subject}", body_html)
     except Exception as exc:
         # Never surface internal email failures to the user — log and ack.
         import logging

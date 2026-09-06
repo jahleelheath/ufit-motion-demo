@@ -18,17 +18,24 @@ carrying FERPA data.
 
 ## Demo logins
 
-The app creates these itself on first boot:
+The login page carries a bar with one-click sign in, ordered so you see the widest
+surface first. No password to ask anyone for.
 
-| Role      | Email                |
-|-----------|----------------------|
-| Principal | principal@demo.com   |
-| Coach     | coach@demo.com       |
-| Parent    | parent@demo.com      |
-| Staff     | staff@demo.com       |
-| Assistant | assistant@demo.com   |
+| # | Role       | Email                | What it opens |
+|---|------------|----------------------|---------------|
+| 1 | Admin      | admin@ufit.com       | every school, analytics, audit log |
+| 2 | Head Coach | coach@demo.com       | log sessions, assessments, incidents |
+| 3 | Principal  | principal@demo.com   | one school, compliance and growth |
+| 4 | Parent     | parent@demo.com      | one child, read only |
 
-Password is set via `UFIT_SEED_PASSWORD`.
+Also seeded: `staff@demo.com`, `assistant@demo.com`, `ceo@demo.com`.
+All share `UFIT_SEED_PASSWORD`.
+
+That bar prints a working password into the page, which is fine here and nowhere else.
+`app/__init__.py` refuses to render it whenever `DATABASE_URL` is set, because that is
+the variable selecting the Postgres backend holding real records. The guard is covered
+by `tests/test_demo_mode.py`, including the case that actually matters: `DEMO_MODE=true`
+against a real database renders nothing and leaks nothing.
 
 ## What is worth looking at
 

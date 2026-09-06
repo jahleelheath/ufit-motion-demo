@@ -29,3 +29,8 @@ services:
         sync: false          # set this in the Render dashboard, never in this file
       - key: UFIT_APP_ROOT
         value: /opt/render/project/src
+      # Renders the demo credential bar on the login page. app/__init__.py refuses to
+      # honour this whenever DATABASE_URL is present, so it cannot leak a working
+      # password onto a page serving real records.
+      - key: DEMO_MODE
+        value: "true"

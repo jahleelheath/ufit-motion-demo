@@ -589,4 +589,4 @@ INSERT OR IGNORE INTO skill_domains (domain_name, domain_type, description) VALU
 INSERT OR IGNORE INTO app_settings (key, value) VALUES
     ('app_name', 'Ufit Motion'),
     ('app_version', '1.0.0'),
-    ('support_email', 'support@ufitonline.net');
+    ('support_email', 'support@demo.com');

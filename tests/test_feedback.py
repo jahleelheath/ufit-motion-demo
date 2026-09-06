@@ -45,7 +45,7 @@ def test_feedback_emails_operations_and_audits(admin_client, monkeypatch):
         headers=_xhr(admin_client),
     )
     assert resp.status_code == 200, resp.data
-    assert sent and sent[0]["to"] == "operations@ufitonline.net"
+    assert sent and sent[0]["to"] == "operations@demo.com"
     assert "login broken" in sent[0]["subject"]
     assert "I cannot log in this morning." in sent[0]["html"]
     assert "/login" in sent[0]["html"]

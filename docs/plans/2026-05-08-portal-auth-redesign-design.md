@@ -13,7 +13,7 @@ The current login screen has 3 portal buttons (Admin, Coach, Staff/Parent) that 
 1. No way for a parent to create their own account — they must be manually created by an admin
 2. Adding a school/coach in the admin UI creates a user row but doesn't deliver login credentials to that user
 3. No visible distinction between active and pending accounts in the admin user list
-4. No CEO-level "super admin" account for Miss A (the founder) provisioned in seed data
+4. No CEO-level "super admin" account for the founder (the founder) provisioned in seed data
 5. The Staff/Parent shared portal is confusing — principals and parents have nothing in common
 
 ## Goals
@@ -87,15 +87,15 @@ On submit:
 4. HubSpot sync: create Contact (parent name, email, phone, relationship, school name) and associate with the school's Company
 5. Auto-login parent → redirect to parent portal
 
-## Section 4: Super Admin Account (Miss A)
+## Section 4: Super Admin Account (the founder)
 
 No new role needed — `ceo` is already the top role with full access.
 
 Operational changes:
-1. Seed a CEO user (`missa@ufitonline.com`, demo password) in seed data
+1. Seed a CEO user (`ceo@demo.com`, demo password) in seed data
 2. Existing safeguard "Cannot delete the last CEO account" verified in user delete endpoint
 3. Add new safeguard: cannot deactivate the last CEO (mirror the delete check)
-4. No special UI — Miss A logs in via the Admin portal card
+4. No special UI — the founder logs in via the Admin portal card
 
 For the real production account, edit the seeded user's email to her real address and have her use Forgot Password to set her own password.
 
@@ -162,5 +162,5 @@ By end of build:
 - [ ] Users list shows Pending/Active badges
 - [ ] Resend Invite button on pending rows works
 - [ ] `/set-password?token=...` page works
-- [ ] Miss A's CEO account exists in seed data
+- [ ] the founder's CEO account exists in seed data
 - [ ] All existing functionality (logging in as seeded users, navigating portals) still works

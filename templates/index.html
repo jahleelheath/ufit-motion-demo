@@ -25,6 +25,71 @@
 </head>
 <body>
   <!-- SPA mount point -->
+  <!-- Demo credential panel. Rendered only when DEMO_MODE is on, which is set by
+       render.yaml on the public demo instance and is never set in production.
+       A founder will not email anyone for a password, so the credentials are on
+       the page and one click fills and submits the real login form. This is a
+       prefill, not an auth bypass: the request goes through the normal endpoint. -->
+  {% if demo_mode %}
+  <div id="demo-bar">
+    <div class="demo-bar__inner">
+      <span class="demo-bar__tag">DEMO</span>
+      <span class="demo-bar__text">Sign in as</span>
+      <button type="button" class="demo-bar__btn" data-demo-email="admin@ufit.com">
+        <b>1. Admin</b><i>every school, analytics, audit log</i></button>
+      <button type="button" class="demo-bar__btn" data-demo-email="coach@demo.com">
+        <b>2. Head Coach</b><i>log sessions, assessments, incidents</i></button>
+      <button type="button" class="demo-bar__btn" data-demo-email="principal@demo.com">
+        <b>3. Principal</b><i>one school, compliance and growth</i></button>
+      <button type="button" class="demo-bar__btn" data-demo-email="parent@demo.com">
+        <b>4. Parent</b><i>one child, read only</i></button>
+      <span class="demo-bar__note">Ordered by how much of the app each role opens. Seeded data only, no real student records.</span>
+    </div>
+  </div>
+  <style>
+    #demo-bar{position:sticky;top:0;z-index:9999;background:#0f172a;color:#e2e8f0;
+      font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+      border-bottom:1px solid #1e293b}
+    .demo-bar__inner{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+      max-width:1100px;margin:0 auto;padding:8px 16px}
+    .demo-bar__tag{background:#f97316;color:#0f172a;font-weight:700;letter-spacing:.06em;
+      border-radius:3px;padding:2px 6px;font-size:11px}
+    .demo-bar__text{opacity:.8}
+    .demo-bar__btn{background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:5px;
+      padding:5px 10px;font:inherit;cursor:pointer;text-align:left;line-height:1.25}
+    .demo-bar__btn b{display:block;font-weight:600}
+    .demo-bar__btn i{display:block;font-style:normal;font-size:11px;opacity:.6}
+    .demo-bar__btn:hover{background:#334155}
+    .demo-bar__btn:focus-visible{outline:2px solid #f97316;outline-offset:2px}
+    .demo-bar__note{opacity:.6;font-size:12px;margin-left:auto}
+    @media (max-width:640px){.demo-bar__note{margin-left:0;width:100%}}
+  </style>
+  <script>
+  (function () {
+    var PW = {{ demo_password | tojson }};
+    function setNative(el, v) {
+      var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement : HTMLInputElement;
+      var setter = Object.getOwnPropertyDescriptor(proto.prototype, 'value').set;
+      setter.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    document.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('[data-demo-email]');
+      if (!btn) return;
+      var form = document.querySelector('#login-form');
+      // The SPA renders the login form lazily, so route there first and retry.
+      if (!form) { location.hash = ''; location.pathname = '/login'; return; }
+      var email = form.querySelector('#email');
+      var pw = form.querySelector('#password');
+      if (!email || !pw) return;
+      setNative(email, btn.getAttribute('data-demo-email'));
+      setNative(pw, PW);
+      form.requestSubmit ? form.requestSubmit() : form.submit();
+    });
+  })();
+  </script>
+  {% endif %}
   <div id="app"></div>
 
   <!-- Site footer — visible on every page, not part of the SPA shell -->
@@ -34,7 +99,7 @@
       <nav class="site-footer-nav" aria-label="Legal">
         <a href="/privacy">Privacy</a>
         <a href="/terms">Terms</a>
-        <a href="mailto:operations@ufitonline.net">Contact</a>
+        <a href="mailto:operations@demo.com">Contact</a>
       </nav>
     </div>
   </footer>

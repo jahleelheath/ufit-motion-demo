@@ -8,18 +8,18 @@ Why dual transport:
   - Render's free tier blocks outbound SMTP (errno 101, "Network is
     unreachable"). HTTP-based transports like Resend bypass that.
   - Gmail SMTP is preserved as the fallback so a paid-Render deploy
-    or local dev can use the operations@ufitonline.net Workspace mailbox
+    or local dev can use the operations@demo.com Workspace mailbox
     without configuring a separate provider.
 
 Configure Resend:
   - RESEND_API_KEY=re_...
   - EMAIL_FROM='Ufit Motion <onboarding@resend.dev>'   ← test domain, no DNS
        OR
-  - EMAIL_FROM='Ufit Motion <noreply@ufitonline.net>'  ← needs DNS records
+  - EMAIL_FROM='Ufit Motion <noreply@demo.com>'  ← needs DNS records
        in Resend's "Domains" tab to verify SPF + DKIM
 
 Configure Gmail SMTP fallback:
-  - GMAIL_USER=operations@ufitonline.net
+  - GMAIL_USER=operations@demo.com
   - GMAIL_APP_PASSWORD=<16-char Google App Password>
 
 Usage:
@@ -38,7 +38,7 @@ from html import escape as _html_escape
 
 APP_BASE_URL = os.environ.get("UFIT_APP_BASE_URL", "http://localhost:5000")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-GMAIL_USER = os.environ.get("GMAIL_USER", "operations@ufitonline.net")
+GMAIL_USER = os.environ.get("GMAIL_USER", "operations@demo.com")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 # Sender address used by Resend AND as the default Gmail SMTP From header.
 # Prefer EMAIL_FROM if set (e.g. "Ufit Motion <onboarding@resend.dev>" while

@@ -1374,7 +1374,7 @@ VALUES
     ('eod_submission_deadline', '20:00'),
     ('assessment_scale_max',    '5'),
     ('normalized_score_max',    '100'),
-    ('support_email',           'support@ufitonline.net')
+    ('support_email',           'support@demo.com')
 ON CONFLICT (key) DO NOTHING;
 
 

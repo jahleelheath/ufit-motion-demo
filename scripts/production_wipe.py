@@ -4,7 +4,7 @@ production_wipe.py — Atomic production reset + first super-admin bootstrap.
 Run via Render Job (or any environment with DATABASE_URL set):
 
     APP_ENV=production \\
-    SUPER_ADMIN_EMAIL=ceo@ufitonline.net \\
+    SUPER_ADMIN_EMAIL=ceo@demo.com \\
     SUPER_ADMIN_PASSWORD='strong-12+chars' \\
     SUPER_ADMIN_FIRST=Boss \\
     SUPER_ADMIN_LAST=Lady \\

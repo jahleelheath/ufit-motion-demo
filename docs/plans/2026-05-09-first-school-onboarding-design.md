@@ -10,7 +10,7 @@
 ## Decisions (all approved during brainstorm session)
 
 ### Q1. Seed-data wipe scope: NUCLEAR
-Wipe ALL operational data including Miss A's seeded CEO account. Keep only static reference data:
+Wipe ALL operational data including the founder's seeded CEO account. Keep only static reference data:
 - Skill catalog: `skill_domains`, `skills`, `benchmarks`
 - System config: `app_settings`, `role_permissions`
 - Everything else (`organizations`, `regions`, `contracts`, `schools`, `users`, `parents`, `students`, `programs`, `sessions`, `attendance`, `assessments`, `assessment_scores`, `behavior_observations`, `eod_reports`, `incident_reports`, `coach_observations`, `school_reports`, all summary tables, `notifications`, `audit_log`, `principal_satisfaction_surveys`, `coach_evaluations`, `coach_performance_snapshots`, `staff_profiles`, `staff_assignments`) gets truncated.
@@ -18,12 +18,12 @@ Wipe ALL operational data including Miss A's seeded CEO account. Keep only stati
 ### Q2. First super admin: atomic via wipe script
 Wipe script accepts `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `SUPER_ADMIN_FIRST`, `SUPER_ADMIN_LAST` env vars. Creates the first CEO in the same transaction as the wipe. No window of "zero admins". User provides the credentials at runtime.
 
-### Q3. Email transport: Gmail SMTP via operations@ufitonline.net
+### Q3. Email transport: Gmail SMTP via operations@demo.com
 - No DNS changes required (Google Workspace handles SPF/DKIM)
 - App password from Google → `GMAIL_APP_PASSWORD` env var
 - `app/email.py` swaps from `httpx` (Resend) → `smtplib` (Gmail)
 - 2,000 emails/day limit is far above realistic onboarding volume
-- Sender shows as `Ufit Motion <operations@ufitonline.net>` — replies route to real ops inbox
+- Sender shows as `Ufit Motion <operations@demo.com>` — replies route to real ops inbox
 - Same graceful no-op pattern: missing creds → log to stdout, no crash
 
 ### Q4. Multi-school coach assignment with hybrid picker
@@ -82,7 +82,7 @@ Scenes:
    - Boilerplate FERPA-compliant copy (user reviews + customizes)
 4. **Help/Support modal** (gap #2)
    - "Help" button in top-nav opens modal with: support email, known issues link, feedback form
-   - Form posts to a new `/api/feedback` endpoint that emails Miss A's inbox
+   - Form posts to a new `/api/feedback` endpoint that emails the founder's inbox
 5. **Backup restore drill + runbook** (gap #3, operational)
    - User runs Supabase point-in-time-restore to a staging project
    - Document the steps in `docs/runbooks/backup-restore.md`

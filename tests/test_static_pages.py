@@ -10,7 +10,7 @@ def test_privacy_returns_200_with_ferpa_content(client):
     body = resp.data.decode("utf-8")
     assert "Privacy Policy" in body
     assert "FERPA" in body
-    assert "operations@ufitonline.net" in body
+    assert "operations@demo.com" in body
 
 
 def test_terms_returns_200(client):
@@ -18,7 +18,7 @@ def test_terms_returns_200(client):
     assert resp.status_code == 200
     body = resp.data.decode("utf-8")
     assert "Terms of Service" in body
-    assert "operations@ufitonline.net" in body
+    assert "operations@demo.com" in body
 
 
 def test_privacy_and_terms_link_back_home(client):

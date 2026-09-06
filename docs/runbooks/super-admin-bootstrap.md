@@ -31,7 +31,7 @@ In the Render dashboard for the `ufit-motion` service:
 
 1. Open **Environment**.
 2. Add (or update) these four env vars:
-   - `SUPER_ADMIN_EMAIL` → e.g. `ceo@ufitonline.net`
+   - `SUPER_ADMIN_EMAIL` → e.g. `ceo@demo.com`
    - `SUPER_ADMIN_PASSWORD` → strong, 12+ chars
    - `SUPER_ADMIN_FIRST` → e.g. `Miss`
    - `SUPER_ADMIN_LAST` → e.g. `A`

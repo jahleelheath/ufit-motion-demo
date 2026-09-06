@@ -98,7 +98,7 @@ Run the smoke-check queries (Path 1 Step 3) AGAINST THE RESTORED PROJECT. Confir
 If migrations ran between the restore point and now, they will not be present in the restored project. Re-apply them via `python run_migrations.py` (or via Supabase SQL editor for individual `step*.sql` files).
 
 ### Step 7 — Notify
-- Email `operations@ufitonline.net` with: incident timestamp, restore point, what was lost, what was recovered, ETA for any data the restore couldn't cover.
+- Email `operations@demo.com` with: incident timestamp, restore point, what was lost, what was recovered, ETA for any data the restore couldn't cover.
 - Update the operational log (`docs/runbooks/operational-log.md`).
 
 ### Step 8 — Decommission the original (bad) project

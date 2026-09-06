@@ -46,7 +46,7 @@ Phase 3 — Frontend (parallelizable internally, depends on Phase 1+2)
   Task 3.3: Status badges + Resend Invite on user list
 
 Phase 4 — Seed Data (last, parallel-safe)
-  Task 4.1: Miss A CEO seed user
+  Task 4.1: the founder CEO seed user
 
 Phase 5 — Final Verification
   Task 5.1: End-to-end demo walkthrough
@@ -273,7 +273,7 @@ git commit -m "admin: expose account_status on user list (active/pending_invite/
 **Files:**
 - Modify: `app/routes/admin_routes.py` — wherever users are deactivated/deleted (the `delete_user` endpoint already has the "last CEO" check around line 670)
 
-**Why:** Mirror the existing delete safeguard for the active_status PATCH endpoint so Miss A can't accidentally lock everyone out.
+**Why:** Mirror the existing delete safeguard for the active_status PATCH endpoint so the founder can't accidentally lock everyone out.
 
 **Step 1: Find the user PATCH endpoint and find the active_status update path**
 
@@ -1011,7 +1011,7 @@ git commit -m "frontend: pending-invite badges and Resend Invite button on user 
 
 ## Phase 4 — Seed Data
 
-### Task 4.1: Miss A CEO Seed User
+### Task 4.1: the founder CEO Seed User
 
 **Files:**
 - Modify: `app/seeds.py` — add a CEO user named after the founder
@@ -1022,19 +1022,19 @@ git commit -m "frontend: pending-invite badges and Resend Invite button on user 
 grep -n "ceo\|admin@ufit\|seed.*user\|INSERT INTO users" /Users/jahleel/Desktop/ufit-motion/app/seeds.py | head -10
 ```
 
-**Step 2: Add Miss A's CEO record**
+**Step 2: Add the founder's CEO record**
 
 Find where seed users are inserted, add (or update if exists):
 
 ```python
-# Miss A — Ufit Founder, CEO-level access
+# the founder — Ufit Founder, CEO-level access
 db.execute(
     """INSERT INTO users (first_name, last_name, email, phone, password_hash,
                           role, active_status, email_verified, created_at)
        VALUES (?, ?, ?, ?, ?, 'ceo', TRUE, TRUE, ?)
        ON CONFLICT (email) DO NOTHING""",
     ("Miss", "A",
-     "missa@ufitonline.com", None,
+     "ceo@demo.com", None,
      generate_password_hash("UfitDemo2026!", method="pbkdf2:sha256"),
      now_utc()),
 )
@@ -1046,7 +1046,7 @@ db.execute(
 
 ```bash
 # Run whatever the project uses for seeding (likely flask db init or scripts/seed_demo.py)
-# Then log in at the app with missa@ufitonline.com / UfitDemo2026!
+# Then log in at the app with ceo@demo.com / UfitDemo2026!
 # Should land in admin portal with full access
 ```
 
@@ -1054,7 +1054,7 @@ db.execute(
 
 ```bash
 git add app/seeds.py
-git commit -m "seeds: add Miss A as the founding CEO account"
+git commit -m "seeds: add the founder as the founding CEO account"
 ```
 
 ---
@@ -1080,8 +1080,8 @@ Run through every demo path in a browser to confirm nothing regressed:
    - Step 1: enter seeded student's name + ID → advance
    - Step 2: fill profile → submit → auto-login → parent portal loads
    - Verify HubSpot contact created (if API key set)
-8. **Miss A login** — log in as `missa@ufitonline.com` → verify CEO portal access
-9. **Last-CEO guard** — try to deactivate Miss A as another admin → expect 409 if she's the only CEO
+8. **the founder login** — log in as `ceo@demo.com` → verify CEO portal access
+9. **Last-CEO guard** — try to deactivate the founder as another admin → expect 409 if she's the only CEO
 10. **Delete a school** — verify cascade still works (users get soft-deleted)
 
 If everything passes, the build is demo-ready.
@@ -1115,6 +1115,6 @@ git push --tags
 - `app/routes/auth_routes.py` — fix reset-password, add 2 parent endpoints
 - `app/routes/admin_routes.py` — auto-invite on user/school create, add account_status, last-CEO guard
 - `app/routes/_hubspot.py` — add notify_parent_registered
-- `app/seeds.py` — add Miss A
+- `app/seeds.py` — add the founder
 - `static/app.js` — 4-portal login + parent register flow + status badges + resend button
 - `static/styles.css` — portal grid styles
